@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="INFO">
+    <!-- <Properties>
+        <Property name="basePath">C:\\logs</Property>
+    </Properties> -->
+
+    <Appenders>
+        <RollingFile name="fileLogger" fileName="D:/InnoComm_Logs/innoComm.log" 
+        	filePattern="D:/InnoComm_Logs/innoComm-%d{yyyy-MM-dd}.log">
+            <PatternLayout>
+                 <pattern>[%d{ISO8601}] InnoComm: %-5p %m%n</pattern>
+            </PatternLayout>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="5 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10" />
+        </RollingFile>
+ 
+        <Console name="console" target="SYSTEM_OUT">
+            <PatternLayout   pattern="[%d{ISO8601}] ERGCAPI: %-5p %m%n" />
+        </Console>
+    </Appenders>
+    <Loggers>
+        <Root level="info" additivity="false">
+            <!-- <appender-ref ref="console" /> -->
+            <appender-ref ref="fileLogger" />
+            <appender-ref ref="console" />
+        </Root>
+    </Loggers>
+</Configuration>
