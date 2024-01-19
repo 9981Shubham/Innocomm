@@ -83,7 +83,7 @@ public class AuthService {
 		}
 		newUser.addRoles(role);
 		UserWallet wallet = new UserWallet();
-		wallet.setBalance(Double.valueOf(100));
+		wallet.setBalance(Double.valueOf(6));
 		UserWallet savedWallet = userWalletRepository.save(wallet);
 		newUser.setUserWallet(savedWallet);
 		newUser.setActive(true);

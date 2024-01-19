@@ -1,6 +1,7 @@
 package sms.plateserv.InnoComm.service;
 
 import java.sql.Date;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -36,6 +37,7 @@ import sms.plateserv.InnoComm.repository.WalletTransactionRepository;
 import sms.plateserv.InnoComm.utils.Utils;
 
 //@Transactional
+
 @Service
 public class SmsCommunicatorService {
 
@@ -64,9 +66,11 @@ public class SmsCommunicatorService {
 	UserWalletRepository userWalletRepository;
 
 	public BaseResponse sendSmsImpl(SmsRequest request) {
+
+		BaseResponse response = null;
+
 		if (!Utils.isEmpty(request)) {
 			LOGGER.debug("Message sending initiated");
-			BaseResponse response = null;
 			List<SmsRequest> smsRequestList = IntStream
 					.range(0, (int) Math.ceil((double) request.getMessage().length() / 160))
 					.mapToObj(i -> SmsRequest.builder()
@@ -74,9 +78,57 @@ public class SmsCommunicatorService {
 									Math.min((i + 1) * 160, request.getMessage().length())))
 							.phoneNumber(request.getPhoneNumber()).userId(request.getUserId()).build())
 					.collect(Collectors.toList());
-			smsRequestList.forEach(sr -> kafkaTemplate.send(TOPIC, sr));
-			response = Utils.SuccessResponse(smsRequestList, "SENDED");
-			return response;
+
+			String phoneNumFromReq = request.getPhoneNumber();
+			Pattern pattern = Pattern.compile(PHONE_NUMBER_PATTERN);
+			Matcher matcher = pattern.matcher(phoneNumFromReq);
+
+			if (!matcher.matches()) {
+
+				response = BaseResponse.builder().message("Message can't be sent as phone number is invalid")
+						.status("Bad Request").response(request).statusCode("400").build();
+				return response;
+			} else {
+
+				String userID = request.getUserId();
+				Optional<User> opt = userRepository.findById(Long.parseLong(userID));
+
+				if (opt.isPresent()) {
+
+					int counter = 0;
+					User user = opt.get();
+					Double balance = user.getUserWallet().getBalance();
+					double temp = balance - smsRequestList.size();
+
+					for (SmsRequest smsReq : smsRequestList) {
+
+						System.out.println("************************** " + balance);
+
+						if (balance > 0) {
+							kafkaTemplate.send(TOPIC, smsReq);
+							counter++;
+						}
+					}
+
+					// ****
+					if (temp < 0) {
+						response = BaseResponse.builder()
+								.message("Total Message in Progress:- " + (smsRequestList.size() + temp)
+										+ " TOTAL MESSAGES UNSENT DUE TO INSUFFICIENT BALANCE:- " + Math.abs(temp))
+								.status("INSUFFICIENT CREDIT USER").response(request).statusCode("200").build();
+					} else {
+						response = BaseResponse.builder()
+								.message("Total Message Could be SENT:- " + smsRequestList.size()).status("SUCCESS")
+								.response(request).statusCode("200").build();
+					}
+					return response;
+
+				} else {
+					response = BaseResponse.builder().message("Message can't be sent as sender is invalid")
+							.status("Bad Request").response(request).statusCode("400").build();
+					return response;
+				}
+			}
 		} else {
 			throw new BaseException(ErrorMessages.SOURCE_INPUT_REQUIRE, ErrorMessages.FAILURE.name(),
 					"input Fields %s  is required ");
@@ -87,7 +139,7 @@ public class SmsCommunicatorService {
 		BaseResponse response = null;
 		Optional<User> findById = userRepository.findById(userId);
 		if (!findById.isEmpty() && ammountToAdd < Double.valueOf(100000)) {
-			LOGGER.debug("The userID is:- "+userId+" and the amount to add is:- "+ammountToAdd);
+			LOGGER.debug("The userID is:- " + userId + " and the amount to add is:- " + ammountToAdd);
 			UserWallet userWallet = findById.get().getUserWallet();
 			userWallet.setBalance(userWallet.getBalance() + ammountToAdd);
 			userWalletRepository.save(userWallet);
@@ -107,7 +159,7 @@ public class SmsCommunicatorService {
 	public void consumeSms(SmsRequest request) {
 		// * Check phone number *
 		String phoneNumber = request.getPhoneNumber();
-		LOGGER.debug("The phone number provided is:- "+phoneNumber);
+		LOGGER.debug("The phone number provided is:- " + phoneNumber);
 		Pattern pattern = Pattern.compile(PHONE_NUMBER_PATTERN);
 		Matcher matcher = pattern.matcher(phoneNumber);
 		TrackingMessage trackingMessage = null;
@@ -142,7 +194,7 @@ public class SmsCommunicatorService {
 						// and update it into database *
 						// * Also update the same into the Tracking table *
 						if (balance > 0) {
-							LOGGER.debug("The balance of the user with ID:- "+userId+" is greater than 0");
+							LOGGER.debug("The balance of the user with ID:- " + userId + " is greater than 0");
 							WalletTransactions walletTransactions = new WalletTransactions().builder()
 									.amount(Double.valueOf(1)).status(TransactionStatus.DEBIT)
 									.date(new Date(System.currentTimeMillis())).user(userId).build();
@@ -152,7 +204,8 @@ public class SmsCommunicatorService {
 							userWallet.setBalance(balance);
 							user.setUserWallet(userWallet);
 							userRepository.save(user);
-							LOGGER.debug("User is also saved and the balance is also deducted after the message is sent");
+							LOGGER.debug(
+									"User is also saved and the balance is also deducted after the message is sent");
 							// * Update this to tracking repository that message has been sent successfully
 							// *
 							trackingMessage = TrackingMessage.builder().phoneNumber(phoneNumber).message(message)
@@ -193,10 +246,14 @@ public class SmsCommunicatorService {
 
 	public BaseResponse bulkSmsSend(BulkSmsRequest bulkRequest) {
 		BaseResponse response = null;
-		if (bulkRequest.getPhoneNumber().size() >0) {
-			bulkRequest.getPhoneNumber().stream().forEach(
-					phone -> sendSmsImpl(new SmsRequest(bulkRequest.getMessage(), phone, bulkRequest.getUserId())));
-			response = Utils.SuccessResponse("Message Send To :" + bulkRequest.getPhoneNumber(), "SMS SENT");
+		List<BaseResponse> ls = new ArrayList<BaseResponse>();
+		if (bulkRequest.getPhoneNumber().size() > 0) {
+			for (String phone : bulkRequest.getPhoneNumber()) {
+				BaseResponse baseRespons2 = sendSmsImpl(
+						new SmsRequest(bulkRequest.getMessage(), phone, bulkRequest.getUserId()));
+				ls.add(baseRespons2);
+			}
+			response = Utils.SuccessResponse(ls, "SMS IN PROGRESS");
 			LOGGER.debug("Message is successfully sent in bulk");
 		} else {
 			LOGGER.debug("Message is not sent as mobile number is not present");
